@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DaiDai Chat</title>
+    <style>
+        body, html {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+        }
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+        }
+        #loginForm, #chatInterface {
+            display: none;
+            height: 100%;
+        }
+        #chatInterface {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+        #chatAreas {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            flex-grow: 1;
+            padding: 5px;
+            height: calc(100vh - 120px); /* 减去标题栏和底部输入框的高度 */
+            overflow: hidden; /* 防止整体滚动 */
+        }
+        .chatArea {
+            border: 1px solid #ccc;
+            padding: 5px;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            margin-bottom: 5px;
+            overflow: hidden; /* 防止内容溢出 */
+        }
+        .chatHistory {
+            flex-grow: 1;
+            border: 1px solid #ddd;
+            overflow-y: auto; /* 允许单个聊天历史滚动 */
+            margin-bottom: 5px;
+            padding: 5px;
+        }
+        .globalInputWrapper {
+            padding: 10px;
+            background-color: #f0f0f0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+        }
+        .globalInputWrapper select,
+        .globalInputWrapper input,
+        .globalInputWrapper button {
+            margin-right: 5px;
+        }
+        .globalInputWrapper input {
+            flex-grow: 1;
+        }
+        .chatAreaHeader {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 5px;
+        }
+        .chatArea .inputWrapper {
+            display: flex;
+            margin-top: 5px;
+        }
+        .chatArea .inputWrapper input {
+            flex-grow: 1;
+            margin-right: 5px;
+        }
+        /* 其他样式保持不变 */
+
+        /* 添加新的样式 */
+        #titleBar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            background-color: #f0f0f0;
+            border-bottom: 1px solid #ccc;
+        }
+        #titleBar h1 {
+            margin: 0;
+            font-size: 24px;
+        }
+        #downloadButton {
+            padding: 5px 10px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        #downloadButton:hover {
+            background-color: #45a049;
+        }
+        #chatInterface {
+            height: calc(100% - 50px); /* 减去标题栏的高度 */
+        }
+        .message {
+            margin-bottom: 15px;
+            position: relative;
+        }
+        .message .time {
+            font-size: 0.75em;
+            color: #888;
+            text-align: right;
+            margin-top: 2px;
+        }
+        .message p {
+            margin: 0;
+        }
+    </style>
+    <!-- 引入 marked.js 和 MathJax -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</head>
+<body>
+    <!-- 添加标题栏 -->
+    <div id="titleBar">
+        <h1>DaiDai Chat</h1>
+        <button id="downloadButton" onclick="downloadChatHistory()">下载对话记录</button>
+    </div>
+
+    <div id="loginForm">
+        <h2>登录</h2>
+        <input type="text" id="apiUrl" placeholder="API 地址" value="https://aihubmix.com/v1">
+        <input type="text" id="apiKey" placeholder="API Key">
+        <button onclick="saveCredentials()">保存</button>
+    </div>
+
+    <div id="chatInterface">
+        <div id="chatAreas"></div>
+        <div class="globalInputWrapper">
+            <select id="areaCountSelect" onchange="updateChatAreaCount()">
+                <option value="2">2个窗口</option>
+                <option value="3" selected>3个窗口</option>
+                <option value="4">4个窗口</option>
+                <option value="6">6个窗口</option>
+            </select>
+            <input type="text" id="userInput" placeholder="输入您的消息...">
+            <button onclick="sendMessageToAll()">发送到所有模型</button>
+        </div>
+    </div>
+
+    <script>
+        // 检查是否已保存凭证
+        if (localStorage.getItem('apiUrl') && localStorage.getItem('apiKey')) {
+            document.getElementById('chatInterface').style.display = 'block';
+            initializeChatAreas();
+        } else {
+            document.getElementById('loginForm').style.display = 'block';
+        }
+
+        function saveCredentials() {
+            const apiUrl = document.getElementById('apiUrl').value;
+            const apiKey = document.getElementById('apiKey').value;
+            localStorage.setItem('apiUrl', apiUrl);
+            localStorage.setItem('apiKey', apiKey);
+            document.getElementById('loginForm').style.display = 'none';
+            document.getElementById('chatInterface').style.display = 'block';
+        }
+
+        function createChatArea(id) {
+            return `
+                <div class="chatArea">
+                    <div class="chatAreaHeader">
+                        <select class="modelSelect" id="modelSelect${id}">
+                            <option value="o1-mini">o1-mini</option>
+                            <option value="gpt-4o">gpt-4o</option>
+                            <option value="gpt-4o-mini">gpt-4o-mini</option>
+                            <option value="gemini-1.5-flash">gemini-1.5-flash</option>
+                            <option value="gemini-pro">gemini-pro</option>
+                            <option value="claude-3-sonnet-20240229">claude-3-sonnet-20240229</option>
+                            <option value="claude-3-opus-20240229">claude-3-opus-20240229</option>
+                            <option value="claude-3-haiku-20240307">claude-3-haiku-20240307</option>
+                            <option value="Qwen/Qwen2-72B-Instruct">Qwen/Qwen2-72B-Instruct</option>
+                            <option value="Qwen/Qwen2-7B-Instruct">Qwen/Qwen2-7B-Instruct</option>
+                            <option value="moonshot-v1-128k">moonshot-v1-128k</option>
+                            <option value="moonshot-v1-32k">moonshot-v1-32k</option>
+                            <option value="moonshot-v1-8k">moonshot-v1-8k</option>
+                            <option value="glm-4">glm-4</option>
+                            <option value="glm-4-flash">glm-4-flash</option>
+                            <option value="glm-4-plus">glm-4-plus</option>
+                            <option value="glm-4v-plus">glm-4v-plus</option>
+                            <option value="yi-large">yi-large</option>
+                            <option value="yi-large-rag">yi-large-rag</option>
+                            <option value="yi-large-turbo">yi-large-turbo</option>
+                            <option value="yi-medium">yi-medium</option>
+                            <option value="yi-vl-plus">yi-vl-plus</option>
+                            <option value="deepseek-ai/DeepSeek-V2.5">deepseek-ai/DeepSeek-V2.5</option>
+                            <option value="Qwen/Qwen2.5-72B-Instruct">Qwen/Qwen2.5-72B-Instruct</option>
+                            <option value="Doubao-pro-128k">Doubao-pro-128k</option>
+                            <option value="moonshot-v1-128k">moonshot-v1-128k</option>
+                            <option value="gpt-4o">gpt-4o</option>
+                            <option value="gemini-1.5-pro-exp-0827">gemini-1.5-pro-exp-0827</option>
+                            <option value="o1-mini-2024-09-12">o1-mini-2024-09-12</option>
+                            <option value="claude-3-sonnet-20240229">claude-3-sonnet-20240229</option>
+                            <option value="claude-3-sonnet-20240229">claude-3-sonnet-20240229</option>
+                        </select>
+                        <button onclick="clearChatHistory(${id})">清除对话记录</button>
+                    </div>
+                    <div class="chatHistory" id="chatHistory${id}"></div>
+                    <div class="inputWrapper" id="inputWrapper${id}">
+                        <input type="text" id="userInput${id}" placeholder="输入您的消息...">
+                        <button onclick="sendMessage(${id})">发送</button>
+                    </div>
+                </div>
+            `;
+        }
+
+        function initializeChatAreas() {
+            const chatAreas = document.getElementById('chatAreas');
+            chatAreas.innerHTML = '';
+            const count = parseInt(document.getElementById('areaCountSelect').value);
+            for (let i = 1; i <= count; i++) {
+                chatAreas.innerHTML += createChatArea(i);
+            }
+            updateChatAreaLayout(count);
+            
+            // 为全局输入框添加回车键监听
+            document.getElementById('userInput').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    sendMessageToAll();
+                }
+            });
+
+            // 为每个聊天区域的输入框添加回车键监听
+            for (let i = 1; i <= count; i++) {
+                document.getElementById(`userInput${i}`).addEventListener('keypress', function(e) {
+                    if (e.key === 'Enter') {
+                        sendMessage(i);
+                    }
+                });
+            }
+
+            // 调整聊天区域的高度以适应新的标题栏
+            const chatAreasContainer = document.getElementById('chatAreas');
+            chatAreasContainer.style.height = 'calc(100vh - 110px)'; // 110px = 标题栏高度 + 底部输入框高度
+        }
+
+        function updateChatAreaCount() {
+            initializeChatAreas();
+        }
+
+        function updateChatAreaLayout(count) {
+            const chatAreas = document.querySelectorAll('.chatArea');
+            const titleBarHeight = 50; // 标题栏高度
+            const bottomInputHeight = 60; // 底部输入框高度
+            const containerHeight = `calc(100vh - ${titleBarHeight + bottomInputHeight}px)`;
+            
+            chatAreas.forEach(area => {
+                switch(count) {
+                    case 2:
+                        area.style.width = 'calc(50% - 5px)';
+                        area.style.height = containerHeight;
+                        break;
+                    case 3:
+                        area.style.width = 'calc(33.33% - 6.67px)';
+                        area.style.height = containerHeight;
+                        break;
+                    case 4:
+                        area.style.width = 'calc(50% - 5px)';
+                        area.style.height = `calc(${containerHeight} / 2 - 5px)`;
+                        break;
+                    case 6:
+                        area.style.width = 'calc(33.33% - 6.67px)';
+                        area.style.height = `calc(${containerHeight} / 2 - 5px)`;
+                        break;
+                }
+            });
+        }
+
+        function clearChatHistory(id) {
+            document.getElementById(`chatHistory${id}`).innerHTML = '';
+        }
+
+        async function sendMessage(id) {
+            const userInput = id ? document.getElementById(`userInput${id}`) : document.getElementById('userInput');
+            const message = userInput.value;
+            const model = document.getElementById(`modelSelect${id}`).value;
+
+            if (message.trim() === '') return;
+
+            addMessageToChatHistory(id, '用户', message);
+            
+            // 添加"生成中"提示
+            const loadingId = addLoadingMessage(id);
+
+            try {
+                const response = await fetch(localStorage.getItem('apiUrl') + '/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + localStorage.getItem('apiKey')
+                    },
+                    body: JSON.stringify({
+                        model: model,
+                        messages: [{ role: 'user', content: message }]
+                    })
+                });
+
+                // 检查响应状态
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+                const aiMessage = data.choices[0].message.content;
+                
+                // 渲染 Markdown 和 LaTeX
+                const renderedMessage = marked.parse(aiMessage); // 使用 marked.parse
+                addMessageToChatHistory(id, 'AI', renderedMessage);
+                MathJax.typeset(); // 重新渲染 LaTeX
+                
+                // 移除"生成中"提示
+                removeLoadingMessage(id, loadingId);
+            } catch (error) {
+                console.error('Error:', error.message); // 输出详细错误信息
+                
+                // 移除"生成中"提示
+                removeLoadingMessage(id, loadingId);
+                
+                addMessageToChatHistory(id, '系统', `发生错误，请重试。错误信息: ${error.message}`);
+            }
+
+            userInput.value = '';
+        }
+
+        function addLoadingMessage(id) {
+            const chatHistory = document.getElementById(`chatHistory${id}`);
+            const loadingId = 'loading-' + Date.now();
+            chatHistory.innerHTML += `<p id="${loadingId}"><strong>AI:</strong> 生成中...</p>`;
+            chatHistory.scrollTop = chatHistory.scrollHeight;
+            return loadingId;
+        }
+
+        function removeLoadingMessage(id, loadingId) {
+            const loadingMessage = document.getElementById(loadingId);
+            if (loadingMessage) {
+                loadingMessage.remove();
+            }
+        }
+
+        function sendMessageToAll() {
+            const message = document.getElementById('userInput').value;
+            if (message.trim() === '') return;
+
+            for (let i = 1; i <= parseInt(document.getElementById('areaCountSelect').value); i++) {
+                document.getElementById(`userInput${i}`).value = message;
+                sendMessage(i);
+            }
+            document.getElementById('userInput').value = '';
+        }
+
+        function addMessageToChatHistory(id, sender, message) {
+            const chatHistory = document.getElementById(`chatHistory${id}`);
+            const time = new Date().toLocaleString(); // 获取当前时间
+            chatHistory.innerHTML += `
+                <div class="message">
+                    <p><strong>${sender}:</strong> ${message}</p>
+                    <div class="time">${time}</div>
+                </div>
+            `;
+            chatHistory.scrollTop = chatHistory.scrollHeight;
+        }
+
+        // 添加下载对话记录的函数
+        function downloadChatHistory() {
+            let csvContent = "data:text/csv;charset=utf-8,";
+            csvContent += "模型,角色,内容,时间\n";
+
+            const chatAreas = document.querySelectorAll('.chatArea');
+            chatAreas.forEach((area, index) => {
+                const model = area.querySelector('.modelSelect').value;
+                const messages = area.querySelectorAll('.chatHistory .message');
+                messages.forEach(message => {
+                    const content = message.querySelector('p');
+                    const role = content.querySelector('strong').textContent.replace(':', '');
+                    const text = content.textContent.replace(`${role}: `, '');
+                    const time = message.querySelector('.time').textContent;
+                    csvContent += `"${model}","${role}","${text}","${time}"\n`;
+                });
+            });
+
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", "chat_history.csv");
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+    </script>
+</body>
+</html>
